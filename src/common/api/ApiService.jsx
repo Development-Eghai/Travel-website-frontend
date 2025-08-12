@@ -402,3 +402,12 @@ export const CreateQuote = async (payload) => {
             return { err: err?.response?.data || err };
         });
 };
+
+// Fetch all quotations
+export const GetAllQuotes = async () => {
+    return await APIBaseUrl.get("/quotations")
+        .then((response) => response.data)
+        .catch((err) => {
+            return { err: err?.response?.data || err };
+        });
+};

@@ -1,9 +1,10 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import QuotePreview from './QuotePreview';
 import { generateSimplePDF, generateModernPDF, generateElegantPDF, generateMinimalistPDF, generateTravelMagazinePDF, generateProfessionalPDF, exportQuoteToPDF_html2pdf } from '../../utils/pdfExport';
 import { CreateQuote, GetAllDestination, GetAllTourType } from '../../common/api/ApiService';
 import { successMsg, errorMsg } from '../../common/Toastify';
+import axios from 'axios';
 
 // Helper: get HTML for preview for each template
 const getQuoteTemplateHTML = (template, quoteData) => {
@@ -44,9 +45,10 @@ const sampleQuotes = [
 const QuoteBuilder = () => {
   const navigate = useNavigate();
   const location = useLocation();
-  const [quotes, setQuotes] = useState(sampleQuotes);
+  const [quotes, setQuotes] = useState([]);
   const [selected, setSelected] = useState([]);
   const [activeTab, setActiveTab] = useState('quotes'); // 'quotes', 'builder', 'itinerary', 'pricing'
+
   
   // Check if lead data was passed from Lead Management
   React.useEffect(() => {
@@ -71,9 +73,7 @@ const QuoteBuilder = () => {
     destination: '',
     tripType: '',
     dateFrom: '',
-    dateTo: '',
-    amountMin: '',
-    amountMax: ''
+    dateTo: ''
   });
   const [newQuote, setNewQuote] = useState({
     leadName: '',
@@ -120,16 +120,7 @@ const QuoteBuilder = () => {
   const [destinationList, setDestinationList] = useState([]);
   const [tripTypeList, setTripTypeList] = useState([]);
   const [isLoadingData, setIsLoadingData] = useState(true);
-
-  // Debug: Log destinationList changes
-  React.useEffect(() => {
-    console.log('DestinationList updated:', destinationList);
-  }, [destinationList]);
-
-  // Debug: Log tripTypeList changes
-  React.useEffect(() => {
-    console.log('TripTypeList updated:', tripTypeList);
-  }, [tripTypeList]);
+  const [destinationNames, setDestinationNames] = useState({}); // Store destination names by ID
 
   // Fetch destinations and trip types on component mount
   React.useEffect(() => {
@@ -141,18 +132,13 @@ const QuoteBuilder = () => {
           GetAllTourType()
         ]);
 
-        console.log('Destination Response:', destinationResponse);
-        console.log('Destination Response.data:', destinationResponse?.data);
-        console.log('Destination Response.data[0]:', destinationResponse?.data?.[0]);
         if (destinationResponse && destinationResponse.statusCode === 200) {
           setDestinationList(destinationResponse.data || []);
-          console.log('Destinations set:', destinationResponse.data);
         } else if (destinationResponse && destinationResponse.data) {
           // Fallback: if response has data but no statusCode
           setDestinationList(destinationResponse.data || []);
-          console.log('Destinations set (fallback):', destinationResponse.data);
         } else {
-          console.error('Error fetching destinations:', destinationResponse?.err);
+          // Error fetching destinations
           // Temporary fallback data for debugging
           setDestinationList([
             { _id: '64a99d2f5c1b2d001f123abc', name: 'Dubai' },
@@ -161,18 +147,13 @@ const QuoteBuilder = () => {
           ]);
         }
 
-        console.log('Trip Type Response:', tripTypeResponse);
-        console.log('Trip Type Response.data:', tripTypeResponse?.data);
-        console.log('Trip Type Response.data[0]:', tripTypeResponse?.data?.[0]);
         if (tripTypeResponse && tripTypeResponse.statusCode === 200) {
           setTripTypeList(tripTypeResponse.data || []);
-          console.log('Trip Types set:', tripTypeResponse.data);
         } else if (tripTypeResponse && tripTypeResponse.data) {
           // Fallback: if response has data but no statusCode
           setTripTypeList(tripTypeResponse.data || []);
-          console.log('Trip Types set (fallback):', tripTypeResponse.data);
         } else {
-          console.error('Error fetching trip types:', tripTypeResponse?.err);
+          // Error fetching trip types
           // Temporary fallback data for debugging
           setTripTypeList([
             { _id: '64a99d5e7c8f3c001f456def', name: 'Honeymoon' },
@@ -181,7 +162,7 @@ const QuoteBuilder = () => {
           ]);
         }
       } catch (error) {
-        console.error('Error fetching data:', error);
+        // Error fetching data
       } finally {
         setIsLoadingData(false);
       }
@@ -204,7 +185,7 @@ const QuoteBuilder = () => {
   const statusOptions = ['Pending', 'Approved', 'Rejected', 'Expired'];
 
   const handleSelectAll = (e) => {
-    setSelected(e.target.checked ? filteredQuotes.map(q => q.id) : []);
+    setSelected(e.target.checked ? filteredQuotes.map(q => q._id) : []);
   };
 
   const handleSelect = (id) => {
@@ -213,13 +194,14 @@ const QuoteBuilder = () => {
 
   const filteredQuotes = quotes.filter(quote => {
     const statusOk = !filters.status || quote.status === filters.status;
-    const destOk = !filters.destination || quote.destination === filters.destination;
-    const tripTypeOk = !filters.tripType || quote.tripType === filters.tripType;
-    const dateOk = (!filters.dateFrom || quote.createdDate >= filters.dateFrom) && 
-                   (!filters.dateTo || quote.createdDate <= filters.dateTo);
-    const amountOk = (!filters.amountMin || quote.totalAmount >= Number(filters.amountMin)) && 
-                     (!filters.amountMax || quote.totalAmount <= Number(filters.amountMax));
-    return statusOk && destOk && tripTypeOk && dateOk && amountOk;
+    const destinationId = quote.destination || quote.destination_id || quote.destinationId || quote.destination_name;
+    const destOk = !filters.destination || 
+                   (destinationNames[destinationId] && 
+                    destinationNames[destinationId].toLowerCase().includes(filters.destination.toLowerCase()));
+    const tripTypeOk = !filters.tripType || (quote.trip_type || quote.tripType) === filters.tripType;
+    const dateOk = (!filters.dateFrom || (quote.created && quote.created >= filters.dateFrom)) && 
+                   (!filters.dateTo || (quote.created && quote.created <= filters.dateTo));
+    return statusOk && destOk && tripTypeOk && dateOk;
   });
 
   const handleFilterChange = (e) => {
@@ -229,7 +211,7 @@ const QuoteBuilder = () => {
 
   const handleResetFilters = () => {
     setFilters({
-      status: '', destination: '', tripType: '', dateFrom: '', dateTo: '', amountMin: '', amountMax: ''
+      status: '', destination: '', tripType: '', dateFrom: '', dateTo: ''
     });
   };
 
@@ -301,302 +283,172 @@ const QuoteBuilder = () => {
         pricing: newPricing
       };
     });
-    
-    // Clear the specific error for this quote item when user starts typing
-    const errorKey = `item${field.charAt(0).toUpperCase() + field.slice(1)}${index}`;
-    if (formErrors[errorKey]) {
-      setFormErrors(prev => {
-        const newErrors = { ...prev };
-        delete newErrors[errorKey];
-        return newErrors;
-      });
-    }
   };
 
-  // Update pricing to include quote items
-  const handlePricingChange = (field, value) => {
-    const newPricing = { ...newQuote.pricing, [field]: value };
-    // Calculate quote items total
+  // Calculate pricing totals
+  const calculatePricing = () => {
+    const adultTotal = (Number(newQuote.pricing.perAdultPrice) || 0) * (Number(newQuote.pricing.adultCount) || 0);
+    const cwobTotal = (Number(newQuote.pricing.cwobPrice) || 0) * (Number(newQuote.pricing.cwobCount) || 0);
+    const cwbTotal = (Number(newQuote.pricing.cwbPrice) || 0) * (Number(newQuote.pricing.cwbCount) || 0);
     const quoteItemsTotal = newQuote.items.reduce((sum, item) => sum + (Number(item.amount) || 0), 0);
-    // Recalculate totals
-    newPricing.adultTotal = newPricing.perAdultPrice * newPricing.adultCount;
-    newPricing.cwobTotal = newPricing.cwobPrice * newPricing.cwobCount;
-    newPricing.cwbTotal = newPricing.cwbPrice * newPricing.cwbCount;
-    newPricing.totalPrice = newPricing.adultTotal + newPricing.cwobTotal + newPricing.cwbTotal + quoteItemsTotal;
-    newPricing.discountAmount = (newPricing.totalPrice * newPricing.discountPercent) / 100;
-    newPricing.payablePrice = newPricing.totalPrice - newPricing.discountAmount;
-    setNewQuote(prev => ({ ...prev, pricing: newPricing }));
-    
-    // Clear the specific error for this pricing field when user starts typing
-    if (formErrors[field]) {
-      setFormErrors(prev => {
-        const newErrors = { ...prev };
-        delete newErrors[field];
-        return newErrors;
-      });
-    }
+    const totalPrice = adultTotal + cwobTotal + cwbTotal + quoteItemsTotal;
+    const discountAmount = (totalPrice * (Number(newQuote.pricing.discountPercent) || 0)) / 100;
+    const payablePrice = totalPrice - discountAmount;
+
+    setNewQuote(prev => ({
+      ...prev,
+      pricing: {
+        ...prev.pricing,
+        adultTotal,
+        cwobTotal,
+        cwbTotal,
+        totalPrice,
+        discountAmount,
+        payablePrice
+      }
+    }));
   };
 
-  const handleNewQuoteChange = (e) => {
-    const { name, value } = e.target;
-    setNewQuote(prev => ({ ...prev, [name]: value }));
-    
-    // Clear the specific error for this field when user starts typing
-    if (formErrors[name]) {
-      setFormErrors(prev => {
-        const newErrors = { ...prev };
-        delete newErrors[name];
-        return newErrors;
-      });
-    }
-  };
+  // Update pricing when relevant fields change
+  React.useEffect(() => {
+    calculatePricing();
+  }, [newQuote.pricing.perAdultPrice, newQuote.pricing.adultCount, newQuote.pricing.cwobPrice, newQuote.pricing.cwobCount, newQuote.pricing.cwbPrice, newQuote.pricing.cwbCount, newQuote.items]);
 
-  // Validation function
-  const validateQuoteForm = (formData) => {
+  const validateQuoteForm = (quoteData) => {
     const errors = {};
-    // Lead info required
-    if (!formData.leadName.trim()) errors.leadName = 'Lead name is required.';
-    if (!formData.leadPhone.trim()) {
-      errors.leadPhone = 'Mobile number is required.';
-    } else if (!/^\d{10,15}$/.test(formData.leadPhone.replace(/\s+/g, ''))) {
-      errors.leadPhone = 'Please enter a valid mobile number (10-15 digits).';
-    }
-    if (!formData.destination || formData.destination === '') errors.destination = 'Destination is required.';
-    if (!formData.tripType || formData.tripType === '') errors.tripType = 'Trip type is required.';
     
-    // Quote items required
-    formData.items.forEach((item, idx) => {
-      if (!item.name.trim()) {
-        errors[`itemName${idx}`] = 'Item name is required.';
-      }
-      if (item.amount === '' || item.amount === null) {
-        errors[`itemAmount${idx}`] = 'Amount is required.';
-      } else if (Number(item.amount) < 0) {
-        errors[`itemAmount${idx}`] = 'Amount cannot be negative.';
-      }
+    if (!quoteData.leadName?.trim()) errors.leadName = 'Lead name is required';
+    if (!quoteData.leadPhone?.trim()) errors.leadPhone = 'Lead phone is required';
+    if (!quoteData.destination?.trim()) errors.destination = 'Destination is required';
+    if (!quoteData.tripType?.trim()) errors.tripType = 'Trip type is required';
+    if (!quoteData.validUntil?.trim()) errors.validUntil = 'Valid until date is required';
+    
+    // Validate days
+    quoteData.days.forEach((day, index) => {
+      if (!day.destination?.trim()) errors[`dayDestination${index}`] = 'Day destination is required';
+      if (!day.date?.trim()) errors[`dayDate${index}`] = 'Day date is required';
+      if (!day.activities?.trim()) errors[`dayActivities${index}`] = 'Day activities are required';
     });
     
-    // Pricing required
-    ['perAdultPrice'].forEach(field => {
-      if (formData.pricing[field] === '' || formData.pricing[field] === null) {
-        errors[field] = 'Value is required.';
-      } else if (formData.pricing[field] < 0) {
-        errors[field] = 'Value cannot be negative.';
-      }
-    });
-    ['cwobPrice','cwbPrice','discountPercent'].forEach(field => {
-      if (formData.pricing[field] !== '' && formData.pricing[field] !== null && formData.pricing[field] < 0) {
-        errors[field] = 'Value cannot be negative.';
-      }
-    });
-    
-    // Additional validations for API requirements
-    if (!formData.validUntil) errors.validUntil = 'Valid until date is required.';
-    
-    // Validate itinerary days
-    formData.days.forEach((day, idx) => {
-      if (!day.destination.trim()) {
-        errors[`dayDestination${idx}`] = 'Day destination is required.';
-      }
-      if (!day.date) {
-        errors[`dayDate${idx}`] = 'Day date is required.';
-      }
-      if (!day.activities.trim()) {
-        errors[`dayActivities${idx}`] = 'Day activities are required.';
-      }
-    });
+    // Validate pricing
+    if (!quoteData.pricing.perAdultPrice) errors.perAdultPrice = 'Per adult price is required';
+    if (!quoteData.pricing.adultCount || quoteData.pricing.adultCount < 1) errors.adultCount = 'Adult count must be at least 1';
     
     return errors;
   };
 
-  const createQuote = async () => {
-    const errors = validateQuoteForm(newQuote);
-    setFormErrors(errors);
-    if (Object.keys(errors).length > 0) return;
-    
-    setIsCreatingQuote(true);
-    try {
-      // Prepare the API payload according to the backend structure
-      const apiPayload = {
-        lead_name: newQuote.leadName,
-        phone_number: newQuote.leadPhone,
-        destination: newQuote.destination,
-        trip_type: newQuote.tripType,
-        
-        quote_item: newQuote.items.map(item => ({
-          item_name: item.name,
-          item_description: item.description || '',
-          item_amount: item.amount.toString()
-        })),
-        
-        day_wise_itenary: newQuote.days.map(day => ({
-          destination: day.destination,
-          date: day.date,
-          description: day.activities,
-          stay: day.overnightStay === 'Yes'
-        })),
-        
-        per_adult_price: newQuote.pricing.perAdultPrice.toString(),
-        child_without_bed: newQuote.pricing.cwobPrice.toString(),
-        child_with_bed: newQuote.pricing.cwbPrice.toString(),
-        
-        discount_amount_percentage: newQuote.pricing.discountPercent.toString(),
-        total_payable_amount: newQuote.pricing.payablePrice.toString(),
-        
-        valid_until: newQuote.validUntil,
-        notes: newQuote.notes || ''
-      };
-
-      // Call the API
-      const response = await CreateQuote(apiPayload);
-      
-      if (response && !response.err) {
-        successMsg('Quote created successfully!');
-        
-        // Add the new quote to the local state with the response data
-        const selectedDestination = destinationList.find(d => {
-          const id = d._id || d.id || d.destination_id;
-          return id === newQuote.destination;
-        });
-        const selectedTripType = tripTypeList.find(t => {
-          const id = t._id || t.id || t.trip_type_id;
-          return id === newQuote.tripType;
-        });
-        
-                  const quoteData = {
-            id: response.data?._id || `QT${(quotes.length + 1).toString().padStart(3, '0')}`,
-            leadName: newQuote.leadName,
-            leadPhone: newQuote.leadPhone,
-            destination: selectedDestination?.name || selectedDestination?.destination_name || selectedDestination?.title || selectedDestination?.destination || newQuote.destination,
-            destinationId: newQuote.destination,
-            tripType: selectedTripType?.name || selectedTripType?.trip_type_name || selectedTripType?.title || selectedTripType?.trip_type || newQuote.tripType,
-            tripTypeId: newQuote.tripType,
-          totalAmount: newQuote.pricing.payablePrice,
-          status: 'Pending',
-          createdDate: new Date().toISOString().slice(0, 10),
-          validUntil: newQuote.validUntil,
-          days: newQuote.days,
-          items: newQuote.items,
-          pricing: newQuote.pricing
-        };
-
-        setQuotes([quoteData, ...quotes]);
-        
-        // Reset the form
-        setNewQuote({
-          leadName: '', leadPhone: '', destination: '', tripType: '', 
-          items: [{ name: '', description: '', amount: '' }],
-          notes: '',
-          validUntil: '',
-          days: [
-            {
-              dayNumber: 1,
-              destination: '',
-              date: '',
-              activities: '',
-              overnightStay: 'Yes'
-            }
-          ],
-          pricing: {
-            perAdultPrice: '',
-            adultCount: 1,
-            adultTotal: 0,
-            cwobPrice: '',
-            cwobCount: 0,
-            cwobTotal: 0,
-            cwbPrice: '',
-            cwbCount: 0,
-            cwbTotal: 0,
-            totalPrice: 0,
-            discountPercent: '',
-            discountAmount: 0,
-            payablePrice: 0
-          }
-        });
-        setActiveTab('quotes');
-      } else {
-        errorMsg(response?.err?.message || 'Failed to create quote. Please try again.');
-      }
-    } catch (error) {
-      console.error('Error creating quote:', error);
-      errorMsg('An error occurred while creating the quote. Please try again.');
-    } finally {
-      setIsCreatingQuote(false);
-    }
-  };
-
-  const handlePreviewQuote = (quote) => {
-    setPreviewQuote(quote);
-    setShowPreview(true);
-  };
-
-  const exportToPDF = () => {
-    if (previewQuote) {
-      generateSimplePDF(previewQuote);
-    }
-  };
-
-  // Edit and Delete handlers
-  const handleEditQuote = (quote) => {
-    setEditingQuote(quote);
-    setEditModalOpen(true);
-    setDropdownOpen(null);
-  };
-
-  const handleDeleteQuote = (quoteId) => {
-    if (window.confirm('Are you sure you want to delete this quote?')) {
-      setQuotes(quotes.filter(q => q.id !== quoteId));
-      setDropdownOpen(null);
-    }
-  };
-
-  const handleSaveEdit = () => {
-    if (editingQuote) {
-      // Update the names based on the selected IDs
-      const selectedDestination = destinationList.find(d => {
-        const id = d._id || d.id || d.destination_id;
-        return id === editingQuote.destination;
-      });
-      const selectedTripType = tripTypeList.find(t => {
-        const id = t._id || t.id || t.trip_type_id;
-        return id === editingQuote.tripType;
-      });
-      
-              const updatedQuote = {
-          ...editingQuote,
-          destination: selectedDestination?.name || selectedDestination?.destination_name || selectedDestination?.title || selectedDestination?.destination || editingQuote.destination,
-          destinationId: editingQuote.destination,
-          tripType: selectedTripType?.name || selectedTripType?.trip_type_name || selectedTripType?.title || selectedTripType?.trip_type || editingQuote.tripType,
-          tripTypeId: editingQuote.tripType
-        };
-      
-      setQuotes(quotes.map(q => q.id === editingQuote.id ? updatedQuote : q));
-      setEditModalOpen(false);
-      setEditingQuote(null);
-    }
-  };
-
-  // Preview handler for current form
-  const handlePreviewCurrent = () => {
-    const errors = validateQuoteForm(newQuote);
-    setFormErrors(errors);
-    if (Object.keys(errors).length > 0) return;
-    setPreviewHTML(getQuoteTemplateHTML(pdfTemplate, { ...newQuote }));
-    setShowPreview(true);
-  };
-
-  // PDF download handler for current form
-  const handleDownloadPDFCurrent = () => {
-    const errors = validateQuoteForm(newQuote);
-    setFormErrors(errors);
-    if (Object.keys(errors).length > 0) return;
-    const html = getQuoteTemplateHTML(pdfTemplate, { ...newQuote });
-    exportQuoteToPDF_html2pdf(html, `Travel_Quotation_${newQuote.leadName || 'Quote'}.pdf`);
-  };
-
-  // Calculate errors dynamically based on current form data
   const currentErrors = validateQuoteForm(newQuote);
   const hasErrors = Object.keys(currentErrors).length > 0;
+
+  // Function to fetch destination name by ID
+  const fetchDestinationName = useCallback(async (destinationId) => {
+    if (!destinationId) {
+      return null;
+    }
+    
+    // If we already have this destination name, return it
+    if (destinationNames[destinationId]) {
+      return destinationNames[destinationId];
+    }
+    
+    try {
+      const response = await axios.get(`http://localhost:8006/api/destinations/get_specific?_id=${destinationId}`);
+      
+      if (response.status === 200 && response.data && response.data.success && response.data.data) {
+        const destinationName = response.data.data.destination_name || response.data.data.name || response.data.data.title || 'Unknown Destination';
+        
+        // Update the state with the new destination name
+        setDestinationNames(prev => ({
+          ...prev,
+          [destinationId]: destinationName
+        }));
+        
+
+        
+        return destinationName;
+      } else {
+        // Set a fallback name to prevent infinite loading
+        setDestinationNames(prev => ({
+          ...prev,
+          [destinationId]: 'Unknown Destination'
+        }));
+
+        return 'Unknown Destination';
+      }
+    } catch (error) {
+      console.error('Error fetching destination name for ID', destinationId, ':', error);
+      // Set a fallback name to prevent infinite loading
+      setDestinationNames(prev => ({
+        ...prev,
+        [destinationId]: 'Error Loading'
+      }));
+      
+      return 'Error Loading';
+    }
+  }, [destinationNames]);
+
+  // Function to fetch all destination names for quotations
+  const fetchAllDestinationNames = useCallback(async (quotations) => {
+    if (!quotations || quotations.length === 0) {
+      return;
+    }
+    
+    const destinationIds = quotations
+      .map(quote => {
+        const id = quote.destination || quote.destination_id || quote.destinationId || quote.destination_name;
+        return id;
+      })
+      .filter(id => id && id !== undefined)
+      .filter(id => !destinationNames[id]); // Only fetch if we don't already have it
+    
+    if (destinationIds.length === 0) {
+      return;
+    }
+    
+    // Fetch destination names sequentially to avoid overwhelming the API
+    for (const id of destinationIds) {
+      try {
+        await fetchDestinationName(id);
+      } catch (error) {
+        console.error(`Error fetching destination name for ID ${id}:`, error);
+      }
+    }
+  }, [fetchDestinationName, destinationNames]);
+
+  useEffect(() => {
+    const fetchQuotations = async () => {
+      try {
+        const response = await axios.get('http://localhost:8006/api/quotations');
+        
+        if (response.status === 200 && response.data && response.data.success && Array.isArray(response.data.data)) {
+          setQuotes(response.data.data);
+        } else {
+          // Invalid API response
+          setQuotes([]); // Fallback to an empty array
+        }
+      } catch (error) {
+        // Error fetching quotations
+        setQuotes([]); // Fallback to an empty array
+      }
+    };
+
+    fetchQuotations();
+  }, []); // Remove fetchAllDestinationNames dependency
+
+  // Fetch destination names when quotes change
+  useEffect(() => {
+    // Only fetch destination names if we have quotes and they're different from what we've already processed
+    if (quotes.length > 0) {
+      const hasNewDestinations = quotes.some(quote => {
+        const destinationId = quote.destination || quote.destination_id || quote.destinationId || quote.destination_name;
+        return destinationId && !destinationNames[destinationId];
+      });
+      
+      if (hasNewDestinations) {
+        fetchAllDestinationNames(quotes);
+      }
+    }
+  }, [quotes, fetchAllDestinationNames, destinationNames]);
 
   return (
     <div className="quote-builder-page" style={{ padding: '2rem', background: '#f8fafc', minHeight: '100vh' }}>
@@ -649,6 +501,10 @@ const QuoteBuilder = () => {
             : 'Build detailed quotes for your leads with customizable packages.'
           }
         </p>
+        
+
+        
+
       </div>
 
       {activeTab === 'quotes' ? (
@@ -697,54 +553,35 @@ const QuoteBuilder = () => {
                 <button 
                   onClick={() => setShowFilters(!showFilters)}
                   style={{ 
-                    background: '#f5f5f5', 
-                    color: '#666', 
-                    border: 'none', 
-                    padding: '8px 16px', 
-                    borderRadius: '6px', 
-                    fontWeight: 500, 
+                    background: '#f5f5f5',
+                    border: '1px solid #ddd',
+                    padding: '8px 16px',
+                    borderRadius: '6px',
                     cursor: 'pointer',
-                    fontSize: 14,
                     display: 'flex',
                     alignItems: 'center',
-                    gap: '6px'
+                    gap: '8px',
+                    fontSize: '14px',
+                    color: '#666'
                   }}
                 >
                   <i className="fa-solid fa-filter"></i>
                   Filters
                 </button>
                 <button 
-                  style={{ 
-                    background: '#f5f5f5', 
-                    color: '#666', 
-                    border: 'none', 
-                    padding: '8px 16px', 
-                    borderRadius: '6px', 
-                    fontWeight: 500, 
-                    cursor: 'pointer',
-                    fontSize: 14,
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '6px'
-                  }}
-                >
-                  <i className="fa-solid fa-download"></i>
-                  Export
-                </button>
-                <button 
                   onClick={() => setActiveTab('builder')}
                   style={{ 
-                    background: '#1976d2', 
-                    color: '#fff', 
-                    border: 'none', 
-                    padding: '8px 16px', 
-                    borderRadius: '6px', 
-                    fontWeight: 600, 
+                    background: '#1976d2',
+                    color: '#fff',
+                    border: 'none',
+                    padding: '8px 16px',
+                    borderRadius: '6px',
                     cursor: 'pointer',
-                    fontSize: 14,
                     display: 'flex',
                     alignItems: 'center',
-                    gap: '6px'
+                    gap: '8px',
+                    fontSize: '14px',
+                    fontWeight: '500'
                   }}
                 >
                   <i className="fa-solid fa-plus"></i>
@@ -753,141 +590,206 @@ const QuoteBuilder = () => {
               </div>
             </div>
 
-            {/* Filter Bar */}
+            {/* Filters Section */}
             {showFilters && (
-              <div className="filter-bar" style={{
-                display: 'flex', flexWrap: 'wrap', gap: '1rem', alignItems: 'center', padding: '1rem 1.5rem', background: '#f8fafc', borderBottom: '1px solid #f0f0f0'
-              }}>
-                <div className="filter-field" style={{ minWidth: 140, flex: 1 }}>
-                  <label style={{ fontWeight: 500, fontSize: '12px' }}>Status</label><br />
-                  <select name="status" value={filters.status} onChange={handleFilterChange} style={{ borderRadius: 4, border: '1px solid #ccc', padding: '6px 8px', width: '100%', fontSize: '12px' }}>
-                    <option value="">All</option>
-                    {statusOptions.map(s => <option key={s} value={s}>{s}</option>)}
-                  </select>
+              <div style={{ padding: '1.5rem', borderBottom: '1px solid #f0f0f0', background: '#fafafa' }}>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '1rem', marginBottom: '1rem' }}>
+                  <div>
+                    <label style={{ display: 'block', marginBottom: '6px', fontSize: '14px', fontWeight: '500', color: '#333' }}>Status</label>
+                    <select
+                      name="status"
+                      value={filters.status}
+                      onChange={handleFilterChange}
+                      style={{
+                        width: '100%',
+                        padding: '8px 12px',
+                        border: '1px solid #ddd',
+                        borderRadius: '6px',
+                        fontSize: '14px'
+                      }}
+                    >
+                      <option value="">All Statuses</option>
+                      {statusOptions.map(status => (
+                        <option key={status} value={status}>{status}</option>
+                      ))}
+                    </select>
+                  </div>
+                  
+                  <div>
+                    <label style={{ display: 'block', marginBottom: '6px', fontSize: '14px', fontWeight: '500', color: '#333' }}>Destination</label>
+                    <select
+                      name="destination"
+                      value={filters.destination}
+                      onChange={handleFilterChange}
+                      style={{
+                        width: '100%',
+                        padding: '8px 12px',
+                        border: '1px solid #ddd',
+                        borderRadius: '6px',
+                        fontSize: '14px'
+                      }}
+                    >
+                      <option value="">All Destinations</option>
+                      {Array.from(new Set(Object.values(destinationNames))).map(destName => (
+                        <option key={destName} value={destName}>{destName}</option>
+                      ))}
+                    </select>
+                  </div>
+                  
+                  <div>
+                    <label style={{ display: 'block', marginBottom: '6px', fontSize: '14px', fontWeight: '500', color: '#333' }}>Trip Type</label>
+                    <select
+                      name="tripType"
+                      value={filters.tripType}
+                      onChange={handleFilterChange}
+                      style={{
+                        width: '100%',
+                        padding: '8px 12px',
+                        border: '1px solid #ddd',
+                        borderRadius: '6px',
+                        fontSize: '14px'
+                      }}
+                    >
+                      <option value="">All Trip Types</option>
+                      {Array.from(new Set(quotes.map(q => q.trip_type || q.tripType).filter(Boolean))).map(tripType => (
+                        <option key={tripType} value={tripType}>{tripType}</option>
+                      ))}
+                    </select>
+                  </div>
+                  
+                  <div>
+                    <label style={{ display: 'block', marginBottom: '6px', fontSize: '14px', fontWeight: '500', color: '#333' }}>Date From</label>
+                    <input
+                      type="date"
+                      name="dateFrom"
+                      value={filters.dateFrom}
+                      onChange={handleFilterChange}
+                      style={{
+                        width: '100%',
+                        padding: '8px 12px',
+                        border: '1px solid #ddd',
+                        borderRadius: '6px',
+                        fontSize: '14px'
+                      }}
+                    />
+                  </div>
+                  
+                  <div>
+                    <label style={{ display: 'block', marginBottom: '6px', fontSize: '14px', fontWeight: '500', color: '#333' }}>Date To</label>
+                    <input
+                      type="date"
+                      name="dateTo"
+                      value={filters.dateTo}
+                      onChange={handleFilterChange}
+                      style={{
+                        width: '100%',
+                        padding: '8px 12px',
+                        border: '1px solid #ddd',
+                        borderRadius: '6px',
+                        fontSize: '14px'
+                      }}
+                    />
+                  </div>
                 </div>
-                <div className="filter-field" style={{ minWidth: 140, flex: 1 }}>
-                  <label style={{ fontWeight: 500, fontSize: '12px' }}>Destination</label><br />
-                  <select name="destination" value={filters.destination} onChange={handleFilterChange} style={{ borderRadius: 4, border: '1px solid #ccc', padding: '6px 8px', width: '100%', fontSize: '12px' }}>
-                    <option value="">All</option>
-                    {isLoadingData ? (
-                      <option value="" disabled>Loading...</option>
-                    ) : (
-                      destinationList.map(d => {
-                        const id = d._id || d.id || d.destination_id;
-                        const name = d.name || d.destination_name || d.title || d.destination;
-                        return <option key={id} value={id}>{name}</option>;
-                      })
-                    )}
-                  </select>
-                </div>
-                <div className="filter-field" style={{ minWidth: 140, flex: 1 }}>
-                  <label style={{ fontWeight: 500, fontSize: '12px' }}>Trip Type</label><br />
-                  <select name="tripType" value={filters.tripType} onChange={handleFilterChange} style={{ borderRadius: 4, border: '1px solid #ccc', padding: '6px 8px', width: '100%', fontSize: '12px' }}>
-                    <option value="">All</option>
-                    {isLoadingData ? (
-                      <option value="" disabled>Loading...</option>
-                    ) : (
-                      tripTypeList.map(t => {
-                        const id = t._id || t.id || t.trip_type_id;
-                        const name = t.name || t.trip_type_name || t.title || t.trip_type;
-                        return <option key={id} value={id}>{name}</option>;
-                      })
-                    )}
-                  </select>
-                </div>
-                <div className="filter-field" style={{ minWidth: 140, flex: 1 }}>
-                  <label style={{ fontWeight: 500, fontSize: '12px' }}>Date From</label><br />
-                  <input type="date" name="dateFrom" value={filters.dateFrom} onChange={handleFilterChange} style={{ borderRadius: 4, border: '1px solid #ccc', padding: '6px 8px', width: '100%', fontSize: '12px' }} />
-                </div>
-                <div className="filter-field" style={{ minWidth: 140, flex: 1 }}>
-                  <label style={{ fontWeight: 500, fontSize: '12px' }}>Date To</label><br />
-                  <input type="date" name="dateTo" value={filters.dateTo} onChange={handleFilterChange} style={{ borderRadius: 4, border: '1px solid #ccc', padding: '6px 8px', width: '100%', fontSize: '12px' }} />
-                </div>
-                <div className="filter-field" style={{ minWidth: 100, flex: 1 }}>
-                  <label style={{ fontWeight: 500, fontSize: '12px' }}>Min Amount</label><br />
-                  <input type="number" name="amountMin" value={filters.amountMin} onChange={handleFilterChange} style={{ borderRadius: 4, border: '1px solid #ccc', padding: '6px 8px', width: '100%', fontSize: '12px' }} />
-                </div>
-                <div className="filter-field" style={{ minWidth: 100, flex: 1 }}>
-                  <label style={{ fontWeight: 500, fontSize: '12px' }}>Max Amount</label><br />
-                  <input type="number" name="amountMax" value={filters.amountMax} onChange={handleFilterChange} style={{ borderRadius: 4, border: '1px solid #ccc', padding: '6px 8px', width: '100%', fontSize: '12px' }} />
-                </div>
-                <div className="filter-field" style={{ minWidth: 120, flex: 1, alignSelf: 'end' }}>
-                  <button onClick={handleResetFilters} style={{ background: '#fff', border: '1px solid #1976d2', color: '#1976d2', borderRadius: 4, padding: '6px 16px', fontWeight: 600, cursor: 'pointer', width: '100%', fontSize: '12px' }}>Reset</button>
+                
+                <div style={{ display: 'flex', gap: '12px', justifyContent: 'flex-end' }}>
+                  <button
+                    onClick={handleResetFilters}
+                    style={{
+                      background: '#f5f5f5',
+                      border: '1px solid #ddd',
+                      padding: '8px 16px',
+                      borderRadius: '6px',
+                      cursor: 'pointer',
+                      fontSize: '14px',
+                      color: '#666'
+                    }}
+                  >
+                    Reset Filters
+                  </button>
                 </div>
               </div>
             )}
 
-            {/* Enhanced Quotes Table */}
+            {/* Table Section */}
             <div style={{ overflowX: 'auto' }}>
-              <table className="quotes-table" style={{ width: '100%', borderCollapse: 'collapse' }}>
-                <thead style={{ background: '#f8fafc', borderBottom: '1px solid #f0f0f0' }}>
-                  <tr>
-                    <th style={{ padding: '16px', textAlign: 'left', fontWeight: 600, color: '#666', fontSize: '14px' }}>
-                      <input type="checkbox" checked={selected.length === filteredQuotes.length && filteredQuotes.length > 0} onChange={handleSelectAll} />
+              <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                <thead>
+                  <tr style={{ background: '#f8f9fa', borderBottom: '1px solid #e9ecef' }}>
+                    <th style={{ padding: '16px', textAlign: 'left', fontWeight: '600', color: '#495057', fontSize: '14px' }}>
+                      <input
+                        type="checkbox"
+                        checked={selected.length === filteredQuotes.length && filteredQuotes.length > 0}
+                        onChange={handleSelectAll}
+                        style={{ marginRight: '8px' }}
+                      />
+                      ID
                     </th>
-                    <th style={{ padding: '16px', textAlign: 'left', fontWeight: 600, color: '#666', fontSize: '14px' }}>Quote ID</th>
-                    <th style={{ padding: '16px', textAlign: 'left', fontWeight: 600, color: '#666', fontSize: '14px' }}>Lead</th>
-                    <th style={{ padding: '16px', textAlign: 'left', fontWeight: 600, color: '#666', fontSize: '14px' }}>Destination</th>
-                    <th style={{ padding: '16px', textAlign: 'left', fontWeight: 600, color: '#666', fontSize: '14px' }}>Trip Type</th>
-                    <th style={{ padding: '16px', textAlign: 'left', fontWeight: 600, color: '#666', fontSize: '14px' }}>Total Amount</th>
-                    <th style={{ padding: '16px', textAlign: 'left', fontWeight: 600, color: '#666', fontSize: '14px' }}>Status</th>
-                    <th style={{ padding: '16px', textAlign: 'left', fontWeight: 600, color: '#666', fontSize: '14px' }}>Created</th>
-                    <th style={{ padding: '16px', textAlign: 'left', fontWeight: 600, color: '#666', fontSize: '14px' }}>Valid Until</th>
-                    <th style={{ padding: '16px', textAlign: 'left', fontWeight: 600, color: '#666', fontSize: '14px' }}>Actions</th>
+                    <th style={{ padding: '16px', textAlign: 'left', fontWeight: '600', color: '#495057', fontSize: '14px' }}>Lead Name</th>
+                    <th style={{ padding: '16px', textAlign: 'left', fontWeight: '600', color: '#495057', fontSize: '14px' }}>Destination</th>
+                    <th style={{ padding: '16px', textAlign: 'left', fontWeight: '600', color: '#495057', fontSize: '14px' }}>Trip Type</th>
+                    <th style={{ padding: '16px', textAlign: 'left', fontWeight: '600', color: '#495057', fontSize: '14px' }}>Status</th>
+                    <th style={{ padding: '16px', textAlign: 'left', fontWeight: '600', color: '#495057', fontSize: '14px' }}>Created</th>
+                    <th style={{ padding: '16px', textAlign: 'left', fontWeight: '600', color: '#495057', fontSize: '14px' }}>Valid Until</th>
+                    <th style={{ padding: '16px', textAlign: 'left', fontWeight: '600', color: '#495057', fontSize: '14px' }}>Actions</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {filteredQuotes.length === 0 ? (
-                    <tr>
-                      <td colSpan={10} style={{ textAlign: 'center', color: '#888', padding: '3rem' }}>
-                        <i className="fa-solid fa-file-invoice" style={{ fontSize: 32, marginBottom: 8 }}></i>
-                        <div>No quotes found for the selected filters.</div>
-                        <button onClick={handleResetFilters} style={{ marginTop: 12, background: '#1976d2', color: '#fff', border: 'none', borderRadius: 4, padding: '8px 20px', fontWeight: 600, cursor: 'pointer' }}>Reset Filters</button>
-                      </td>
-                    </tr>
-                  ) : filteredQuotes.map((quote, idx) => (
-                    <tr
-                      key={quote.id}
-                      style={{
-                        background: selected.includes(quote.id) ? '#e3f2fd' : idx % 2 === 0 ? '#fff' : '#fafbfc',
-                        borderBottom: '1px solid #f0f0f0',
-                        transition: 'background 0.2s'
-                      }}
-                      onMouseEnter={e => e.currentTarget.style.background = selected.includes(quote.id) ? '#e3f2fd' : '#f8fafc'}
-                      onMouseLeave={e => e.currentTarget.style.background = selected.includes(quote.id) ? '#e3f2fd' : idx % 2 === 0 ? '#fff' : '#fafbfc'}
-                    >
-                      <td style={{ padding: '16px' }}>
-                        <input
-                          type="checkbox"
-                          checked={selected.includes(quote.id)}
-                          onChange={() => handleSelect(quote.id)}
-                        />
-                      </td>
+                  {filteredQuotes.map((quote, index) => (
+                    <tr key={quote._id} style={{ 
+                      borderBottom: '1px solid #f0f0f0',
+                      background: index % 2 === 0 ? '#fff' : '#fafafa'
+                    }}>
                       <td style={{ padding: '16px' }}>
                         <button
+                          onClick={() => {
+                            navigator.clipboard.writeText(quote._id);
+                            successMsg('Quote ID copied to clipboard!');
+                          }}
                           style={{
                             background: 'none',
                             border: 'none',
-                            color: '#1976d2',
-                            textDecoration: 'underline',
                             cursor: 'pointer',
-                            fontWeight: 600,
-                            fontSize: '14px'
+                            color: '#1976d2',
+                            fontSize: '12px',
+                            fontFamily: 'monospace',
+                            textDecoration: 'underline',
+                            padding: '0'
                           }}
-                          title="View Quote Details"
+                          title="Click to copy ID"
                         >
-                          {quote.id}
+                          {quote._id}
                         </button>
                       </td>
                       <td style={{ padding: '16px' }}>
-                        <div>
-                          <div style={{ fontWeight: 600, color: '#1a1a1a', fontSize: '14px' }}>{quote.leadName}</div>
-                          <div style={{ color: '#666', fontSize: '12px' }}>{quote.leadPhone}</div>
+                        <div style={{ fontWeight: 600, color: '#1a1a1a', fontSize: '14px' }}>
+                          {quote.lead_name || quote.leadName || 'N/A'}
                         </div>
                       </td>
-                      <td style={{ padding: '16px', color: '#1a1a1a', fontSize: '14px' }}>{quote.destination}</td>
-                      <td style={{ padding: '16px', color: '#1a1a1a', fontSize: '14px' }}>{quote.tripType}</td>
-                      <td style={{ padding: '16px', color: '#1a1a1a', fontSize: '14px', fontWeight: 600 }}>${quote.totalAmount}</td>
+                      <td style={{ padding: '16px', color: '#1a1a1a', fontSize: '14px' }}>
+                        {(() => {
+                          const destinationId = quote.destination || quote.destination_id || quote.destinationId || quote.destination_name;
+                          const destinationName = destinationNames[destinationId];
+                          
+                          return destinationId ? (
+                            destinationName ? (
+                              <span style={{ color: '#1a1a1a', fontWeight: '500' }}>
+                                {destinationName}
+                              </span>
+                            ) : (
+                              <span style={{ color: '#999', fontStyle: 'italic' }}>
+                                <i className="fa-solid fa-spinner fa-spin" style={{ marginRight: '6px' }}></i>
+                                Loading...
+                              </span>
+                            )
+                          ) : (
+                            'N/A'
+                          );
+                        })()}
+                      </td>
+                      <td style={{ padding: '16px', color: '#1a1a1a', fontSize: '14px' }}>
+                        {quote.trip_type || quote.tripType || 'N/A'}
+                      </td>
                       <td style={{ padding: '16px' }}>
                         <span
                           style={{
@@ -910,16 +812,20 @@ const QuoteBuilder = () => {
                             fontSize: 12
                           }}
                         >
-                          {quote.status}
+                          {quote.status || 'N/A'}
                         </span>
                       </td>
-                      <td style={{ padding: '16px', color: '#666', fontSize: '12px' }}>{quote.createdDate}</td>
-                      <td style={{ padding: '16px', color: '#666', fontSize: '12px' }}>{quote.validUntil}</td>
+                      <td style={{ padding: '16px', color: '#666', fontSize: '12px' }}>
+                        {quote.created ? new Date(quote.created).toLocaleDateString() : 'N/A'}
+                      </td>
+                      <td style={{ padding: '16px', color: '#666', fontSize: '12px' }}>
+                        {quote.valid_until ? new Date(quote.valid_until).toLocaleDateString() : 'N/A'}
+                      </td>
                       <td style={{ padding: '16px', position: 'relative' }}>
                         {/* Actions Dropdown */}
                         <div className="dropdown-container" style={{ position: 'relative' }}>
                           <button
-                            onClick={() => setDropdownOpen(dropdownOpen === quote.id ? null : quote.id)}
+                            onClick={() => setDropdownOpen(dropdownOpen === quote._id ? null : quote._id)}
                             style={{
                               background: 'none',
                               border: 'none',
@@ -937,62 +843,68 @@ const QuoteBuilder = () => {
                             <i className="fa-solid fa-ellipsis-vertical"></i>
                           </button>
                           
-                          {dropdownOpen === quote.id && (
+                          {dropdownOpen === quote._id && (
                             <div style={{
                               position: 'absolute',
                               top: '100%',
                               right: 0,
                               background: '#fff',
                               border: '1px solid #e0e0e0',
-                              borderRadius: '6px',
+                              borderRadius: '8px',
                               boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
                               zIndex: 1000,
                               minWidth: '120px',
-                              padding: '8px 0'
+                              overflow: 'hidden'
                             }}>
                               <button
-                                onClick={() => handleEditQuote(quote)}
+                                onClick={() => {
+                                  setEditingQuote(quote);
+                                  setEditModalOpen(true);
+                                  setDropdownOpen(null);
+                                }}
                                 style={{
                                   width: '100%',
-                                  background: 'none',
+                                  padding: '12px 16px',
                                   border: 'none',
-                                  padding: '8px 16px',
-                                  textAlign: 'left',
+                                  background: 'none',
                                   cursor: 'pointer',
-                                  fontSize: '13px',
-                                  color: '#333',
                                   display: 'flex',
                                   alignItems: 'center',
-                                  gap: '8px'
+                                  gap: '8px',
+                                  fontSize: '14px',
+                                  color: '#333',
+                                  transition: 'background-color 0.2s'
                                 }}
-                                onMouseOver={e => e.target.style.background = '#f5f5f5'}
-                                onMouseOut={e => e.target.style.background = 'none'}
+                                onMouseEnter={e => e.currentTarget.style.background = '#f5f5f5'}
+                                onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
                               >
-                                <i className="fa-solid fa-edit" style={{ fontSize: '11px', color: '#1976d2' }}></i>
+                                <i className="fa-solid fa-edit" style={{ color: '#1976d2' }}></i>
                                 Edit
                               </button>
-                              
-                              <div style={{ borderTop: '1px solid #e0e0e0', margin: '4px 0' }}></div>
-                              
                               <button
-                                onClick={() => handleDeleteQuote(quote.id)}
+                                onClick={() => {
+                                  if (window.confirm('Are you sure you want to delete this quote?')) {
+                                    setQuotes(quotes.filter(q => q._id !== quote._id));
+                                    setDropdownOpen(null);
+                                  }
+                                }}
                                 style={{
                                   width: '100%',
-                                  background: 'none',
+                                  padding: '12px 16px',
                                   border: 'none',
-                                  padding: '8px 16px',
-                                  textAlign: 'left',
+                                  background: 'none',
                                   cursor: 'pointer',
-                                  fontSize: '13px',
-                                  color: '#d32f2f',
                                   display: 'flex',
                                   alignItems: 'center',
-                                  gap: '8px'
+                                  gap: '8px',
+                                  fontSize: '14px',
+                                  color: '#e53935',
+                                  transition: 'background-color 0.2s'
                                 }}
-                                onMouseOver={e => e.target.style.background = '#ffebee'}
-                                onMouseOut={e => e.target.style.background = 'none'}
+                                onMouseEnter={e => e.currentTarget.style.background = '#ffebee'}
+                                onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
                               >
-                                <i className="fa-solid fa-trash" style={{ fontSize: '11px' }}></i>
+                                <i className="fa-solid fa-trash" style={{ color: '#e53935' }}></i>
                                 Delete
                               </button>
                             </div>
@@ -1089,12 +1001,11 @@ const QuoteBuilder = () => {
                       <option value="" disabled>Loading destinations...</option>
                     ) : (
                       (() => {
-                        console.log('Rendering destinations:', destinationList);
-                        console.log('First destination object:', destinationList[0]);
+                        
                         return destinationList.map(d => {
                           const id = d._id || d.id || d.destination_id;
                           const name = d.name || d.destination_name || d.title || d.destination;
-                          console.log('Destination item:', { id, name, original: d });
+                          
                           return <option key={id} value={id}>{name}</option>;
                         });
                       })()
@@ -1122,7 +1033,7 @@ const QuoteBuilder = () => {
                       <option value="" disabled>Loading trip types...</option>
                     ) : (
                       tripTypeList.map((t, index) => {
-                        console.log(`Trip type item ${index}:`, t);
+                        
                         const id = t._id || t.id || t.trip_type_id;
                         const name = t.tour_name;
                         return <option key={id || index} value={id}>{name || 'Unnamed Trip Type'}</option>;
@@ -1783,7 +1694,7 @@ const QuoteBuilder = () => {
               fontWeight: 700,
               letterSpacing: 1,
               fontSize: 22
-            }}>Edit Quote: {editingQuote.id}</h2>
+            }}>Edit Quote: {editingQuote._id}</h2>
             
             <div style={{ marginBottom: 20 }}>
               <label style={{ fontWeight: 600, marginBottom: 8, display: 'block' }}>Lead Name</label>
@@ -1922,4 +1833,4 @@ const QuoteBuilder = () => {
   );
 };
 
-export default QuoteBuilder; 
+export default QuoteBuilder;
