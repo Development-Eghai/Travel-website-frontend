@@ -354,7 +354,9 @@ const QuoteBuilder = () => {
     try {
       const response = await axios.get(`http://localhost:8006/api/destinations/get_specific?_id=${destinationId}`);
       
-      if (response.status === 200 && response.data && response.data.success && response.data.data) {
+
+      
+      if (response.status === 200 && response.data && response.data.data) {
         const destinationName = response.data.data.destination_name || response.data.data.name || response.data.data.title || 'Unknown Destination';
         
         // Update the state with the new destination name
@@ -553,10 +555,10 @@ const QuoteBuilder = () => {
                 <button 
                   onClick={() => setShowFilters(!showFilters)}
                   style={{ 
-                    background: '#f5f5f5',
+                    background: '#f5f5f5', 
                     border: '1px solid #ddd',
-                    padding: '8px 16px',
-                    borderRadius: '6px',
+                    padding: '8px 16px', 
+                    borderRadius: '6px', 
                     cursor: 'pointer',
                     display: 'flex',
                     alignItems: 'center',
@@ -571,11 +573,11 @@ const QuoteBuilder = () => {
                 <button 
                   onClick={() => setActiveTab('builder')}
                   style={{ 
-                    background: '#1976d2',
-                    color: '#fff',
-                    border: 'none',
-                    padding: '8px 16px',
-                    borderRadius: '6px',
+                    background: '#1976d2', 
+                    color: '#fff', 
+                    border: 'none', 
+                    padding: '8px 16px', 
+                    borderRadius: '6px', 
                     cursor: 'pointer',
                     display: 'flex',
                     alignItems: 'center',
@@ -612,8 +614,8 @@ const QuoteBuilder = () => {
                       {statusOptions.map(status => (
                         <option key={status} value={status}>{status}</option>
                       ))}
-                    </select>
-                  </div>
+                  </select>
+                </div>
                   
                   <div>
                     <label style={{ display: 'block', marginBottom: '6px', fontSize: '14px', fontWeight: '500', color: '#333' }}>Destination</label>
@@ -633,8 +635,8 @@ const QuoteBuilder = () => {
                       {Array.from(new Set(Object.values(destinationNames))).map(destName => (
                         <option key={destName} value={destName}>{destName}</option>
                       ))}
-                    </select>
-                  </div>
+                  </select>
+                </div>
                   
                   <div>
                     <label style={{ display: 'block', marginBottom: '6px', fontSize: '14px', fontWeight: '500', color: '#333' }}>Trip Type</label>
@@ -654,8 +656,8 @@ const QuoteBuilder = () => {
                       {Array.from(new Set(quotes.map(q => q.trip_type || q.tripType).filter(Boolean))).map(tripType => (
                         <option key={tripType} value={tripType}>{tripType}</option>
                       ))}
-                    </select>
-                  </div>
+                  </select>
+                </div>
                   
                   <div>
                     <label style={{ display: 'block', marginBottom: '6px', fontSize: '14px', fontWeight: '500', color: '#333' }}>Date From</label>
@@ -672,7 +674,7 @@ const QuoteBuilder = () => {
                         fontSize: '14px'
                       }}
                     />
-                  </div>
+                </div>
                   
                   <div>
                     <label style={{ display: 'block', marginBottom: '6px', fontSize: '14px', fontWeight: '500', color: '#333' }}>Date To</label>
@@ -689,7 +691,7 @@ const QuoteBuilder = () => {
                         fontSize: '14px'
                       }}
                     />
-                  </div>
+                </div>
                 </div>
                 
                 <div style={{ display: 'flex', gap: '12px', justifyContent: 'flex-end' }}>
@@ -737,7 +739,7 @@ const QuoteBuilder = () => {
                 <tbody>
                   {filteredQuotes.map((quote, index) => (
                     <tr key={quote._id} style={{ 
-                      borderBottom: '1px solid #f0f0f0',
+                        borderBottom: '1px solid #f0f0f0',
                       background: index % 2 === 0 ? '#fff' : '#fafafa'
                     }}>
                       <td style={{ padding: '16px' }}>
